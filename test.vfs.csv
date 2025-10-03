@@ -1,0 +1,10 @@
+#type;path;content;permissions;owner
+dir;/home;;rwxr-xr-x;root
+dir;/home/user;;rwxr-xr-x;user
+file;/home/user/test.txt;VGhpcyBpcyBhIHRlc3QgZmlsZQ==;rw-r--r--;user
+dir;/home/user/documents;;rwxr-xr-x;user
+file;/home/user/documents/doc1.txt;RG9jdW1lbnQgMQ==;rw-r--r--;user
+file;/home/user/documents/doc2.txt;RG9jdW1lbnQgMg==;rw-r--r--;user
+dir;/var;;rwxr-xr-x;root
+dir;/var/log;;rwxr-xr-x;root
+file;/var/log/system.log;U3lzdGVtIGxvZw==;rw-r--r--;root
