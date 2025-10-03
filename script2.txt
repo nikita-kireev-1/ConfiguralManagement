@@ -1,0 +1,3 @@
+ls
+unknowncommand
+cd /home
