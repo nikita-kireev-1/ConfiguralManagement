@@ -1,3 +1,11 @@
 ls
-cd \home\user
-ls -la
+cd /home
+ls
+cd user
+ls
+uniq test.txt
+cd /home/user/documents
+ls
+tail doc2.txt
+tail -n 1 doc2.txt
+exit

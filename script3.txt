@@ -1,3 +1,1 @@
-exit
-ls "path with spaces"
-cd "another path"
+tail /home

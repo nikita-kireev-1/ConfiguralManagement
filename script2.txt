@@ -1,3 +1,1 @@
-ls
-unknowncommand
-cd /home
+uniq /home

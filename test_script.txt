@@ -1,11 +1,1 @@
-ls
-cd /home
-ls
-cd user
-ls
-cd documents
-ls
-cd /var/log
-ls
-cd /nonexistent
-ls
+uniq nonexistent.file

@@ -6,6 +6,446 @@ import java.nio.file.*;
 import java.io.IOException;
 import java.util.List;
 
+public class TerminalEmulator {
+    private VirtualFileSystem vfs;
+    private JFrame frame;
+    private JTextArea outputArea;
+    private JTextField inputField;
+    private final String username = System.getProperty("user.name");
+    private final String hostname;
+    private String vfsPath;
+    private String scriptPath;
+    private boolean scriptMode = false;
+
+    public TerminalEmulator(String vfsPath, String scriptPath) throws Exception {
+        this.hostname = java.net.InetAddress.getLocalHost().getHostName();
+        this.vfsPath = vfsPath;
+        this.scriptPath = scriptPath;
+        initializeGUI();
+        printDebugInfo();
+        if (vfsPath != null && !vfsPath.isEmpty()) {
+            try {
+                vfs = new VirtualFileSystem();
+                vfs.loadFromCSV(vfsPath);
+                outputArea.append("VFS loaded successfully from: " + vfsPath + "\n");
+            } catch (Exception e) {
+                outputArea.append("Error loading VFS: " + e.getMessage() + "\n");
+            }
+        }
+        if (scriptPath != null && !scriptPath.isEmpty()) {
+            executeStartupScript();
+        }
+    }
+
+    private void initializeGUI() {
+        // Настройка основного окна
+        frame = new JFrame("Эмулятор - [" + username + "@" + hostname + "]");
+        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame.setSize(600, 400);
+
+        // Область вывода
+        outputArea = new JTextArea();
+        outputArea.setEditable(false);
+        outputArea.setBackground(Color.BLACK);
+        outputArea.setForeground(Color.WHITE);
+        JScrollPane scrollPane = new JScrollPane(outputArea);
+
+        // Поле ввода
+        inputField = new JTextField();
+        inputField.setBackground(Color.BLACK);
+        inputField.setForeground(Color.WHITE);
+        inputField.addActionListener(this::handleCommand);
+
+        // Разметка
+        frame.setLayout(new BorderLayout());
+        frame.add(scrollPane, BorderLayout.CENTER);
+        frame.add(inputField, BorderLayout.SOUTH);
+
+        frame.setVisible(true);
+        inputField.requestFocus();
+    }
+
+    private void printDebugInfo() {
+        outputArea.append("=== Debug Information ===\n");
+        outputArea.append("VFS Path: " + (vfsPath != null ? vfsPath : "not specified") + "\n");
+        outputArea.append("Script Path: " + (scriptPath != null ? scriptPath : "not specified") + "\n");
+        outputArea.append("Username: " + username + "\n");
+        outputArea.append("Hostname: " + hostname + "\n");
+        outputArea.append("=========================\n\n");
+    }
+
+    private void executeStartupScript() {
+        scriptMode = true;
+        outputArea.append("=== Executing Startup Script ===\n");
+
+        try {
+            List<String> lines = Files.readAllLines(Paths.get(scriptPath));
+            for (String line : lines) {
+                if (line.trim().isEmpty() || line.trim().startsWith("#")) {
+                    continue; // Пропускаем пустые строки и комментарии
+                }
+                outputArea.append("$ " + line + "\n");
+                boolean success = executeScriptCommand(line);
+
+                if (!success) {
+                    outputArea.append("Script execution stopped due to error.\n");
+                    break;
+                }
+            }
+        } catch (IOException e) {
+            outputArea.append("Error reading script file: " + e.getMessage() + "\n");
+        } catch (Exception e) {
+            outputArea.append("Error executing script: " + e.getMessage() + "\n");
+        }
+
+        outputArea.append("=== Script Execution Finished ===\n\n");
+        scriptMode = false;
+    }
+
+    private boolean executeScriptCommand(String command) {
+        try {
+            List<String> args = parseArguments(command);
+            if (args.isEmpty()) return true;
+
+            String cmd = args.get(0);
+            switch (cmd) {
+                case "ls":
+                    if (vfs == null) {
+                        outputArea.append("VFS not loaded\n");
+                        return true;
+                    } else {
+                        List<String> files = vfs.listCurrentDir();
+                        if (files.isEmpty()) {
+                            outputArea.append("(empty)\n");
+                        } else {
+                            for (String file : files) {
+                                outputArea.append(file + "\n");
+                            }
+                        }
+                        return true;
+                    }
+                case "cd":
+                    if (vfs == null) {
+                        outputArea.append("VFS not loaded\n");
+                        return true;
+                    } else if (args.size() < 2) {
+                        outputArea.append("cd: missing argument\n");
+                        return false;
+                    } else {
+                        boolean success = vfs.changeDirectory(args.get(1));
+                        if (!success) {
+                            outputArea.append("cd: no such directory: " + args.get(1) + "\n");
+                            return false;
+                        }
+                        return true;
+                    }
+                case "uniq":
+                    if (vfs == null) {
+                        outputArea.append("VFS not loaded\n");
+                        return true;
+                    } else if (args.size() < 2) {
+                        outputArea.append("uniq: missing file argument\n");
+                        return false;
+                    } else {
+                        String content = vfs.readFileContent(args.get(1));
+                        if (content == null) {
+                            outputArea.append("uniq: cannot open '" + args.get(1) + "': No such file\n");
+                            return false;
+                        }
+                        String result = uniq(content);
+                        outputArea.append(result);
+                        if (!result.endsWith("\n") && !result.isEmpty()) {
+                            outputArea.append("\n");
+                        }
+                        return true;
+                    }
+                case "tail":
+                    if (vfs == null) {
+                        outputArea.append("VFS not loaded\n");
+                        return true;
+                    } else if (args.size() < 2) {
+                        outputArea.append("tail: missing file argument\n");
+                        return false;
+                    } else {
+                        int lineCount = 10; // default
+                        String filename;
+
+                        if (args.size() == 2) {
+                            filename = args.get(1);
+                        } else if (args.size() == 4 && args.get(1).equals("-n")) {
+                            try {
+                                lineCount = Integer.parseInt(args.get(2));
+                                filename = args.get(3);
+                            } catch (NumberFormatException e) {
+                                outputArea.append("tail: invalid number of lines: " + args.get(2) + "\n");
+                                return false;
+                            }
+                        } else {
+                            outputArea.append("tail: invalid arguments\n");
+                            return false;
+                        }
+
+                        String content = vfs.readFileContent(filename);
+                        if (content == null) {
+                            outputArea.append("tail: cannot open '" + filename + "': No such file\n");
+                            return false;
+                        }
+                        String result = tail(content, lineCount);
+                        outputArea.append(result);
+                        if (!result.endsWith("\n") && !result.isEmpty()) {
+                            outputArea.append("\n");
+                        }
+                        return true;
+                    }
+                case "exit":
+                    outputArea.append("exit command in script - ignoring\n");
+                    return true;
+                default:
+                    outputArea.append("Command not found: " + cmd + "\n");
+                    return false;
+            }
+        } catch (Exception e) {
+            outputArea.append("Error: " + e.getMessage() + "\n");
+            return false;
+        }
+    }
+
+    private void handleCommand(ActionEvent e) {
+        String input = inputField.getText().trim();
+        inputField.setText("");
+        outputArea.append("$ " + input + "\n");
+
+        String currentPath = "~";
+        if (vfs != null) {
+            currentPath = vfs.getCurrentPath();
+        }
+        outputArea.append(username + "@" + hostname + ":" + currentPath + "$ " + input + "\n");
+
+        if (input.isEmpty()) return;
+
+        try {
+            List<String> args = parseArguments(input);
+            String command = args.get(0);
+
+            switch (command) {
+                case "ls":
+                    if (vfs == null) {
+                        outputArea.append("VFS not loaded\n");
+                    } else {
+                        List<String> files = vfs.listCurrentDir();
+                        if (files.isEmpty()) {
+                            outputArea.append("(empty)\n");
+                        } else {
+                            for (String file : files) {
+                                outputArea.append(file + "\n");
+                            }
+                        }
+                    }
+                    break;
+                case "cd":
+                    if (vfs == null) {
+                        outputArea.append("VFS not loaded\n");
+                    } else if (args.size() < 2) {
+                        outputArea.append("cd: missing argument\n");
+                    } else {
+                        boolean success = vfs.changeDirectory(args.get(1));
+                        if (!success) {
+                            outputArea.append("cd: no such directory: " + args.get(1) + "\n");
+                        }
+                    }
+                    break;
+                case "uniq":
+                    if (vfs == null) {
+                        outputArea.append("VFS not loaded\n");
+                    } else if (args.size() < 2) {
+                        outputArea.append("uniq: missing file argument\n");
+                    } else {
+                        String content = vfs.readFileContent(args.get(1));
+                        if (content == null) {
+                            outputArea.append("uniq: cannot open '" + args.get(1) + "': No such file\n");
+                        } else {
+                            String result = uniq(content);
+                            outputArea.append(result);
+                            if (!result.endsWith("\n") && !result.isEmpty()) {
+                                outputArea.append("\n");
+                            }
+                        }
+                    }
+                    break;
+                case "tail":
+                    if (vfs == null) {
+                        outputArea.append("VFS not loaded\n");
+                    } else if (args.size() < 2) {
+                        outputArea.append("tail: missing file argument\n");
+                    } else {
+                        int lineCount = 10; // default
+                        String filename;
+
+                        if (args.size() == 2) {
+                            filename = args.get(1);
+                        } else if (args.size() == 4 && args.get(1).equals("-n")) {
+                            try {
+                                lineCount = Integer.parseInt(args.get(2));
+                                filename = args.get(3);
+                            } catch (NumberFormatException e1) {
+                                outputArea.append("tail: invalid number of lines: " + args.get(2) + "\n");
+                                break;
+                            }
+                        } else {
+                            outputArea.append("tail: invalid arguments\n");
+                            break;
+                        }
+
+                        String content = vfs.readFileContent(filename);
+                        if (content == null) {
+                            outputArea.append("tail: cannot open '" + filename + "': No such file\n");
+                        } else {
+                            String result = tail(content, lineCount);
+                            outputArea.append(result);
+                            if (!result.endsWith("\n") && !result.isEmpty()) {
+                                outputArea.append("\n");
+                            }
+                        }
+                    }
+                    break;
+                case "exit":
+                    System.exit(0);
+                    break;
+                default:
+                    outputArea.append("Command not found: " + command + "\n");
+            }
+        } catch (Exception ex) {
+            outputArea.append("Error: " + ex.getMessage() + "\n");
+        }
+
+        outputArea.setCaretPosition(outputArea.getDocument().getLength());
+    }
+
+
+    private List<String> parseArguments(String input) throws Exception {
+        List<String> args = new ArrayList<>();
+        StringBuilder currentArg = new StringBuilder();
+        boolean inQuotes = false;
+
+        for (char c : input.toCharArray()) {
+            if (c == '"') {
+                inQuotes = !inQuotes;
+            } else if (Character.isWhitespace(c) && !inQuotes) {
+                if (currentArg.length() > 0) {
+                    args.add(currentArg.toString());
+                    currentArg.setLength(0);
+                }
+            } else {
+                currentArg.append(c);
+            }
+        }
+
+        if (inQuotes) {
+            throw new Exception("Unclosed quotes");
+        }
+
+        if (currentArg.length() > 0) {
+            args.add(currentArg.toString());
+        }
+
+        return args;
+    }
+
+    private String uniq(String content) {
+        if (content == null || content.isEmpty()) {
+            return "";
+        }
+
+        String[] lines = content.split(" ");
+        if (lines.length == 0) {
+            return "";
+        }
+
+        List<String> result = new ArrayList<>();
+        String previousLine = null;
+
+        for (String line : lines) {
+            if (!line.equals(previousLine)) {
+                result.add(line);
+                previousLine = line;
+            }
+        }
+
+        return String.join(" ", result);
+    }
+
+    private String tail(String content, int lineCount) {
+        if (content == null || content.isEmpty()) {
+            return "";
+        }
+
+        String[] lines = content.split(" ");
+        if (lines.length == 0) {
+            return "";
+        }
+
+        int startIndex = Math.max(0, lines.length - lineCount);
+        List<String> lastLines = new ArrayList<>();
+
+        for (int i = startIndex; i < lines.length; i++) {
+            lastLines.add(lines[i]);
+        }
+
+        return String.join(" ", lastLines);
+    }
+
+    public static void main(String[] args) throws Exception {
+
+        Scanner sc = new Scanner(System.in);
+        System.out.println("Do you want to enter script file?");
+        //-vfs
+        //C:\Users\admin\Desktop\ideaproj\configm\practice1\test.vfs.csv
+        //-script
+        //script path example: C:\Users\admin\Desktop\ideaproj\configm\practice1\script2.txt
+        // или  java TerminalEmulator2.java -vfs "\path\to\vfs" -script "C:\Users\admin\Desktop\ideaproj\configm\practice1\script.txt"
+        String answer = sc.nextLine();
+        String[] arguments;
+        if(Objects.equals(answer, "Yes")){
+            String v = sc.nextLine();
+            String vPath = sc.nextLine();
+            String s = sc.nextLine();
+            String sPath = sc.nextLine();
+            String[] commands = {v,vPath,s,sPath};
+            arguments = Arrays.copyOf(commands,commands.length);
+        }else{
+            arguments = Arrays.copyOf(args,args.length);
+        }
+        String vfsPath = null;
+        String scriptPath = null;
+
+        for (int i = 0; i < arguments.length; i++) {
+            switch (arguments[i]) {
+                case "-vfs":
+                    if (i + 1 < arguments.length) {
+                        vfsPath = arguments[++i];
+                    }
+                    break;
+                case "-script":
+                    if (i + 1 < arguments.length) {
+                        scriptPath = arguments[++i];
+                    }
+                    break;
+            }
+        }
+
+        final String finalVfsPath = vfsPath;
+        final String finalScriptPath = scriptPath;
+
+        SwingUtilities.invokeLater(() -> {
+            try {
+                new TerminalEmulator(finalVfsPath, finalScriptPath);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+}
+
 class VFSNode {
     String name;
     boolean isDirectory;
@@ -201,289 +641,49 @@ class VirtualFileSystem {
 
         return "/" + String.join("/", pathComponents);
     }
-}
 
-public class TerminalEmulator {
-    private VirtualFileSystem vfs;
-    private JFrame frame;
-    private JTextArea outputArea;
-    private JTextField inputField;
-    private final String username = System.getProperty("user.name");
-    private final String hostname;
-    private String vfsPath;
-    private String scriptPath;
-    private boolean scriptMode = false;
-
-    public TerminalEmulator(String vfsPath, String scriptPath) throws Exception {
-        this.hostname = java.net.InetAddress.getLocalHost().getHostName();
-        this.vfsPath = vfsPath;
-        this.scriptPath = scriptPath;
-        initializeGUI();
-        printDebugInfo();
-        if (vfsPath != null && !vfsPath.isEmpty()) {
-            try {
-                vfs = new VirtualFileSystem();
-                vfs.loadFromCSV(vfsPath);
-                outputArea.append("VFS loaded successfully from: " + vfsPath + "\n");
-            } catch (Exception e) {
-                outputArea.append("Error loading VFS: " + e.getMessage() + "\n");
+    public VFSNode getFile(String path) {
+        if (!path.startsWith("/")) {
+            // Относительный путь от текущей директории
+            if (currentDir.children.containsKey(path) && !currentDir.children.get(path).isDirectory) {
+                return currentDir.children.get(path);
             }
+            return null;
         }
-        if (scriptPath != null && !scriptPath.isEmpty()) {
-            executeStartupScript();
-        }
-    }
 
-    private void initializeGUI() {
-        // Настройка основного окна
-        frame = new JFrame("Эмулятор - [" + username + "@" + hostname + "]");
-        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setSize(600, 400);
+        // Абсолютный путь
+        String[] components = path.substring(1).split("/");
+        VFSNode current = root;
 
-        // Область вывода
-        outputArea = new JTextArea();
-        outputArea.setEditable(false);
-        outputArea.setBackground(Color.BLACK);
-        outputArea.setForeground(Color.WHITE);
-        JScrollPane scrollPane = new JScrollPane(outputArea);
+        for (int i = 0; i < components.length; i++) {
+            String component = components[i];
+            if (component.isEmpty()) continue;
 
-        // Поле ввода
-        inputField = new JTextField();
-        inputField.setBackground(Color.BLACK);
-        inputField.setForeground(Color.WHITE);
-        inputField.addActionListener(this::handleCommand);
-
-        // Разметка
-        frame.setLayout(new BorderLayout());
-        frame.add(scrollPane, BorderLayout.CENTER);
-        frame.add(inputField, BorderLayout.SOUTH);
-
-        frame.setVisible(true);
-        inputField.requestFocus();
-    }
-
-    private void printDebugInfo() {
-        outputArea.append("=== Debug Information ===\n");
-        outputArea.append("VFS Path: " + (vfsPath != null ? vfsPath : "not specified") + "\n");
-        outputArea.append("Script Path: " + (scriptPath != null ? scriptPath : "not specified") + "\n");
-        outputArea.append("Username: " + username + "\n");
-        outputArea.append("Hostname: " + hostname + "\n");
-        outputArea.append("=========================\n\n");
-    }
-
-    private void executeStartupScript() {
-        scriptMode = true;
-        outputArea.append("=== Executing Startup Script ===\n");
-
-        try {
-            List<String> lines = Files.readAllLines(Paths.get(scriptPath));
-            for (String line : lines) {
-                if (line.trim().isEmpty() || line.trim().startsWith("#")) {
-                    continue; // Пропускаем пустые строки и комментарии
-                }
-                outputArea.append("$ " + line + "\n");
-                boolean success = executeScriptCommand(line);
-
-                if (!success) {
-                    outputArea.append("Script execution stopped due to error.\n");
-                    break;
-                }
+            if (!current.children.containsKey(component)) {
+                return null;
             }
-        } catch (IOException e) {
-            outputArea.append("Error reading script file: " + e.getMessage() + "\n");
-        } catch (Exception e) {
-            outputArea.append("Error executing script: " + e.getMessage() + "\n");
-        }
 
-        outputArea.append("=== Script Execution Finished ===\n\n");
-        scriptMode = false;
-    }
-
-    private boolean executeScriptCommand(String command) {
-        try {
-            List<String> args = parseArguments(command);
-            if (args.isEmpty()) return true;
-
-            String cmd = args.get(0);
-            switch (cmd) {
-                case "ls":
-                    if (vfs == null) {
-                        outputArea.append("VFS not loaded\n");
-                        return true;
-                    } else {
-                        List<String> files = vfs.listCurrentDir();
-                        if (files.isEmpty()) {
-                            outputArea.append("(empty)\n");
-                        } else {
-                            for (String file : files) {
-                                outputArea.append(file + "\n");
-                            }
-                        }
-                        return true;
-                    }
-                case "cd":
-                    if (vfs == null) {
-                        outputArea.append("VFS not loaded\n");
-                        return true;
-                    } else if (args.size() < 2) {
-                        outputArea.append("cd: missing argument\n");
-                        return false;
-                    } else {
-                        boolean success = vfs.changeDirectory(args.get(1));
-                        if (!success) {
-                            outputArea.append("cd: no such directory: " + args.get(1) + "\n");
-                            return false;
-                        }
-                        return true;
-                    }
-                case "exit":
-                    outputArea.append("exit command in script - ignoring\n");
-                    return true;
-                default:
-                    outputArea.append("Command not found: " + cmd + "\n");
-                    return false;
-            }
-        } catch (Exception e) {
-            outputArea.append("Error: " + e.getMessage() + "\n");
-            return false;
-        }
-    }
-
-    private void handleCommand(ActionEvent e) {
-        String input = inputField.getText().trim();
-        inputField.setText("");
-        outputArea.append("$ " + input + "\n");
-
-        String currentPath = "~";
-        if (vfs != null) {
-            currentPath = vfs.getCurrentPath();
-        }
-        outputArea.append(username + "@" + hostname + ":" + currentPath + "$ " + input + "\n");
-
-        if (input.isEmpty()) return;
-
-        try {
-            List<String> args = parseArguments(input);
-            String command = args.get(0);
-
-            switch (command) {
-                case "ls":
-                    if (vfs == null) {
-                        outputArea.append("VFS not loaded\n");
-                    } else {
-                        List<String> files = vfs.listCurrentDir();
-                        if (files.isEmpty()) {
-                            outputArea.append("(empty)\n");
-                        } else {
-                            for (String file : files) {
-                                outputArea.append(file + "\n");
-                            }
-                        }
-                    }
-                    break;
-                case "cd":
-                    if (vfs == null) {
-                        outputArea.append("VFS not loaded\n");
-                    } else if (args.size() < 2) {
-                        outputArea.append("cd: missing argument\n");
-                    } else {
-                        boolean success = vfs.changeDirectory(args.get(1));
-                        if (!success) {
-                            outputArea.append("cd: no such directory: " + args.get(1) + "\n");
-                        }
-                    }
-                    break;
-                case "exit":
-                    System.exit(0);
-                    break;
-                default:
-                    outputArea.append("Command not found: " + command + "\n");
-            }
-        } catch (Exception ex) {
-            outputArea.append("Error: " + ex.getMessage() + "\n");
-        }
-
-        outputArea.setCaretPosition(outputArea.getDocument().getLength());
-    }
-
-
-    private List<String> parseArguments(String input) throws Exception {
-        List<String> args = new ArrayList<>();
-        StringBuilder currentArg = new StringBuilder();
-        boolean inQuotes = false;
-
-        for (char c : input.toCharArray()) {
-            if (c == '"') {
-                inQuotes = !inQuotes;
-            } else if (Character.isWhitespace(c) && !inQuotes) {
-                if (currentArg.length() > 0) {
-                    args.add(currentArg.toString());
-                    currentArg.setLength(0);
-                }
+            VFSNode next = current.children.get(component);
+            if (i == components.length - 1) {
+                return next.isDirectory ? null : next;
             } else {
-                currentArg.append(c);
+                if (!next.isDirectory) {
+                    return null;
+                }
+                current = next;
             }
         }
 
-        if (inQuotes) {
-            throw new Exception("Unclosed quotes");
-        }
-
-        if (currentArg.length() > 0) {
-            args.add(currentArg.toString());
-        }
-
-        return args;
+        return null;
     }
 
-    public static void main(String[] args) throws Exception {
-
-        Scanner sc = new Scanner(System.in);
-        System.out.println("Do you want to enter script file?");
-        //-vfs
-        //C:\Users\admin\Desktop\ideaproj\configm\practice1\test.vfs.csv
-        //-script
-        //script path example: C:\Users\admin\Desktop\ideaproj\configm\practice1\script2.txt
-        // или  java TerminalEmulator2.java -vfs "\path\to\vfs" -script "C:\Users\admin\Desktop\ideaproj\configm\practice1\script.txt"
-        String answer = sc.nextLine();
-        String[] arguments;
-        if(Objects.equals(answer, "Yes")){
-            String v = sc.nextLine();
-            String vPath = sc.nextLine();
-            String s = sc.nextLine();
-            String sPath = sc.nextLine();
-            String[] commands = {v,vPath,s,sPath};
-            arguments = Arrays.copyOf(commands,commands.length);
-        }else{
-            arguments = Arrays.copyOf(args,args.length);
+    public String readFileContent(String path) {
+        VFSNode file = getFile(path);
+        if (file == null) {
+            return null;
         }
-        String vfsPath = null;
-        String scriptPath = null;
-
-        for (int i = 0; i < arguments.length; i++) {
-            switch (arguments[i]) {
-                case "-vfs":
-                    if (i + 1 < arguments.length) {
-                        vfsPath = arguments[++i];
-                    }
-                    break;
-                case "-script":
-                    if (i + 1 < arguments.length) {
-                        scriptPath = arguments[++i];
-                    }
-                    break;
-            }
-        }
-
-        final String finalVfsPath = vfsPath;
-        final String finalScriptPath = scriptPath;
-
-        SwingUtilities.invokeLater(() -> {
-            try {
-                new TerminalEmulator(finalVfsPath, finalScriptPath);
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        });
+        return file.getContentAsString();
     }
 }
+
+
