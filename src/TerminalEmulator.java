@@ -197,6 +197,25 @@ public class TerminalEmulator {
                         }
                         return true;
                     }
+                case "chown":
+                    if (vfs == null) {
+                        outputArea.append("VFS not loaded\n");
+                        return false;
+                    } else if (args.size() < 3) {
+                        outputArea.append("chown: missing arguments\n");
+                        return false;
+                    } else {
+                        String newOwner = args.get(1);
+                        String path = args.get(2);
+                        boolean success = vfs.changeOwner(path, newOwner);
+                        if (!success) {
+                            outputArea.append("chown: cannot access '" + path + "': No such file or directory\n");
+                            return false;
+                        }else {
+                            outputArea.append("Owner changed to: " + newOwner + "\n");
+                            return true;
+                        }
+                    }
                 case "exit":
                     outputArea.append("exit command in script - ignoring\n");
                     return true;
@@ -305,6 +324,22 @@ public class TerminalEmulator {
                             if (!result.endsWith("\n") && !result.isEmpty()) {
                                 outputArea.append("\n");
                             }
+                        }
+                    }
+                    break;
+                case "chown":
+                    if (vfs == null) {
+                        outputArea.append("VFS not loaded\n");
+                    } else if (args.size() < 3) {
+                        outputArea.append("chown: missing arguments\n");
+                    } else {
+                        String newOwner = args.get(1);
+                        String path = args.get(2);
+                        boolean success = vfs.changeOwner(path, newOwner);
+                        if (!success) {
+                            outputArea.append("chown: cannot access '" + path + "': No such file or directory\n");
+                        }else {
+                            outputArea.append("Owner changed to: " + newOwner + "\n");
                         }
                     }
                     break;
@@ -452,11 +487,13 @@ class VFSNode {
     String content;
     Map<String, VFSNode> children = new HashMap<>();
     VFSNode parent;
+    String owner;
 
     VFSNode(String name, boolean isDirectory, VFSNode parent) {
         this.name = name;
         this.isDirectory = isDirectory;
         this.parent = parent;
+        this.owner = "admin";
     }
     // Метод для получения содержимого как обычной строки (декодирует Base64 если нужно)
     public String getContentAsString() {
@@ -683,6 +720,43 @@ class VirtualFileSystem {
             return null;
         }
         return file.getContentAsString();
+    }
+
+    public boolean changeOwner(String path, String newOwner) {
+        VFSNode node = getNode(path); // нужен метод, возвращающий узел по пути (файл или директорию)
+        if (node == null) {
+            return false;
+        }
+        node.owner = newOwner;
+        return true;
+    }
+    public VFSNode getNode(String path) {
+        if (path.equals("/")) {
+            return root;
+        }
+
+        if (!path.startsWith("/")) {
+            // Относительный путь
+            if (currentDir.children.containsKey(path)) {
+                return currentDir.children.get(path);
+            }
+            return null;
+        }
+
+        // Абсолютный путь
+        String[] components = path.substring(1).split("/");
+        VFSNode current = root;
+
+        for (String component : components) {
+            if (component.isEmpty()) continue;
+
+            if (!current.children.containsKey(component)) {
+                return null;
+            }
+            current = current.children.get(component);
+        }
+
+        return current;
     }
 }
 

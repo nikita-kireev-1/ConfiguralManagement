@@ -1,1 +1,6 @@
-tail /home
+ls
+cd home
+cd user
+chown Nikita test.txt
+chown NeNikita no_such_file.txt
+ls
